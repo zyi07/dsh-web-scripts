@@ -23,3 +23,13 @@
 - GitHub 创建 `zyi07/dsh-scripts` 仓库后 push（本机无 GitHub token，无法代建）
 - 用户确认后可删除 `/root/dsh-scripts/.backup-dsh-*-orig` 与 `/root/cordis.patch.yml.bak-*`
 ---
+
+## 2026-10-30 12:40 - 无域名支持文档化 + Windows WSL2 部署手册
+
+**做了什么：**
+- `install.sh` 新增 WSL 环境检测：WSL 下未启用 systemd 时直接报错并给出 /etc/wsl.conf 修复步骤
+- 新增 `docs/WSL.md`：WSL2 安装、systemd 启用、无域名本机部署、localhost 转发排障、vmIdleTimeout / mirrored 防自动关机
+- README 拆分"方式 A 无域名 / 方式 B 有域名"，DSH_DOMAIN 说明改为"留空=纯本机使用"
+- 配置项已对照 Microsoft Learn 官方文档核实（vmIdleTimeout 默认 60000ms、mirrored 需 Win11 22H2 + WSL 2.0+）
+- WSL 实机流程未验证（服务器无 Windows 环境），标注为标准流程
+---
