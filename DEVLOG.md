@@ -33,3 +33,18 @@
 - 配置项已对照 Microsoft Learn 官方文档核实（vmIdleTimeout 默认 60000ms、mirrored 需 Win11 22H2 + WSL 2.0+）
 - WSL 实机流程未验证（服务器无 Windows 环境），标注为标准流程
 ---
+
+## 2026-10-30 12:35 - Cloudflare 托管使用手册
+
+**做了什么：**
+- 新增 `docs/CLOUDFLARE.md`：两套方案——① CF 代理 + nginx 源站（有公网 IP，Full strict + Origin 证书/Let's Encrypt）；② Cloudflare Tunnel（无公网 IP/内网穿透，cloudflared 出站连接，零端口开放）
+- 共同注意事项：WS 100 秒空闲断开（CF 固定限制，已核实）、token 经 CF 可见、/api 缓存 Bypass、cookie 无 Secure 标志的原因（DSH 不读 X-Forwarded-Proto，上游已知行为）
+- 排障速查表：524 / 1006 / Host 不信任 / Flexible 循环重定向 / tunnel 排查
+- README 方式 B 增加指向链接
+- 提交 hash: 见 git log
+
+**事实核查：**
+- CF WS 100s 空闲超时（Free/Pro/Business 固定，Enterprise 可调）→ magpie 搜索多来源核实
+- cloudflared login/create/route dns/config.yml/service install 流程 → 多来源交叉核实
+- WSL 篇同款声明：Tunnel 方案未在无公网机器实测，流程按官方标准编写
+---
