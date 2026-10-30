@@ -1,0 +1,66 @@
+#!/bin/bash
+# dsh-upgrade — 升级 DSH 核心到 npm 最新版并安全重启
+# 强化点：
+#   1. 升级前记录当前版本，失败可回滚（保留旧版本号）
+#   2. npm 拦截原生构建脚本时，自动补跑 node-pty / koffi 预编译
+#   3. 升级后先做 --dump-config 冒烟测试，再重启服务
+#   4. 自动输出新访问链接
+set -euo pipefail
+
+SERVICE="${DSH_SERVICE:-dsh}"
+PKG="${DSH_NPM_PACKAGE:-@deepseek-ai/dsh}"
+
+CURRENT="$(dsh --version 2>/dev/null || echo '未知')"
+LATEST="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
+
+if [ -z "$LATEST" ]; then
+    echo "❌ 无法查询 npm 上的最新版本，请检查网络后重试。" >&2
+    exit 1
+fi
+
+echo "当前版本：$CURRENT"
+echo "最新版本：$LATEST"
+
+if [ "$CURRENT" = "$LATEST" ]; then
+    echo "✅ 已是最新版本，无需升级。"
+    exit 0
+fi
+
+echo "开始升级 $PKG $CURRENT → $LATEST ..."
+if ! npm install -g "$PKG@$LATEST" 2>&1 | grep -v "^npm warn"; then
+    echo "❌ npm 安装失败，保留在旧版本 $CURRENT。" >&2
+    exit 1
+fi
+
+# npm 默认拦截依赖的原生构建脚本，逐个补跑预编译（幂等，已构建则跳过）
+GLOBAL_ROOT="$(npm root -g)"
+echo "检查原生模块构建..."
+(
+    cd "$GLOBAL_ROOT/@deepseek-ai/dsh/node_modules/node-pty" 2>/dev/null \
+        && node scripts/prebuild.js >/dev/null 2>&1 || true
+)
+(
+    cd "$GLOBAL_ROOT/@deepseek-ai/dsh/node_modules/koffi" 2>/dev/null \
+        && node cnoke.cjs -P . -D src/koffi --prebuild --release >/dev/null 2>&1 || true
+)
+# 验证两个关键模块能加载（在依赖目录里执行以正确解析）
+APP_DIR="$GLOBAL_ROOT/@deepseek-ai/dsh/node_modules"
+(
+    cd "$APP_DIR" 2>/dev/null
+    node -e "require('koffi')" >/dev/null 2>&1 && echo "  ✓ koffi OK" \
+        || echo "  ⚠️ koffi 加载失败（可能影响部分功能）"
+    node -e "require('node-pty')" >/dev/null 2>&1 && echo "  ✓ node-pty OK" \
+        || echo "  ⚠️ node-pty 加载失败（可能影响终端功能）"
+)
+
+echo "配置冒烟测试..."
+if ! dsh --profile "${DSH_PROFILE:-web}" --dump-config >/dev/null 2>/tmp/dsh-upgrade-smoke.err; then
+    echo "❌ 新版本配置组装失败！已停止重启，服务仍在跑旧版本 $CURRENT。" >&2
+    echo "   错误详情：/tmp/dsh-upgrade-smoke.err；回滚命令：" >&2
+    echo "   npm install -g $PKG@$CURRENT --force" >&2
+    cat /tmp/dsh-upgrade-smoke.err >&2 || true
+    exit 1
+fi
+echo "  ✓ 配置组装正常"
+
+dsh-restart
