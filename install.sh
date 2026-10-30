@@ -26,6 +26,22 @@ SERVICE="dsh"
 # 尽早固定脚本自身目录，防止后续 cd 影响相对路径解析
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# WSL 环境检测：必须开启 systemd，否则 systemctl 不可用
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    if [ "$(ps -p 1 -o comm= 2>/dev/null)" != "systemd" ]; then
+        echo "❌ 检测到 WSL 但未启用 systemd，服务脚本依赖 systemctl。" >&2
+        echo "   修复方法（在 WSL 内执行）：" >&2
+        echo "     sudo tee /etc/wsl.conf <<'EOF'" >&2
+echo "     [boot]" >&2
+echo "     systemd=true" >&2
+echo "     EOF" >&2
+        echo "   然后在 Windows PowerShell 执行：wsl --shutdown，再重新打开 WSL 重跑本脚本。" >&2
+        echo "   详细说明见仓库内 docs/WSL.md" >&2
+        exit 1
+    fi
+    echo "==> 检测到 WSL 环境（systemd 已启用）✓"
+fi
+
 echo "==> 1/7 检查 Node.js"
 NODE_MAJOR="$(node --version 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/' || echo 0)"
 if [ "$NODE_MAJOR" -lt 20 ]; then

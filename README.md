@@ -4,16 +4,34 @@ DSH（DeepSeek Harness）Web 服务运维脚本集：一键安装、升级、重
 
 ## 适用环境
 
-- Debian / Ubuntu（aarch64 或 x86_64）
+- Linux：Debian / Ubuntu（aarch64 或 x86_64）
+- Windows：WSL2 + Ubuntu（需启用 systemd，见 [docs/WSL.md](docs/WSL.md)）
 - Node.js >= 20（脚本会自动装）
 - systemd
 
 ## 一键安装（新机器）
 
+### 方式 A：没有域名 / 本机使用（含 Windows + WSL）
+
+```bash
+git clone https://github.com/zyi07/dsh-web-scripts.git && cd dsh-web-scripts
+sudo bash install.sh
+```
+
+**不传 `DSH_DOMAIN` 即可**：服务只监听 `127.0.0.1`，本地回环天然受 DSH
+信任，无需 `--trusted-host`，安装结束直接输出 `http://127.0.0.1:3080/?token=...`。
+
+Windows 用户走 WSL2 部署：**详见 [docs/WSL.md](docs/WSL.md)**（含 systemd
+启用、localhost 转发排障、防止 WSL 自动关机等）。
+
+### 方式 B：有域名 / 对外提供服务
+
 ```bash
 git clone https://github.com/zyi07/dsh-web-scripts.git && cd dsh-web-scripts
 sudo DSH_DOMAIN=你的域名 bash install.sh
 ```
+
+域名会作为 `--trusted-host` 传入，配合 nginx 反代（配置见下文）从外网访问。
 
 `install.sh` 会依次完成：
 
@@ -29,7 +47,7 @@ sudo DSH_DOMAIN=你的域名 bash install.sh
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `DSH_DOMAIN` | 空 | 外网域名，传入后会加 `--trusted-host`（**强烈建议**，否则 `/api` 会被浏览器信任围栏拒绝） |
+| `DSH_DOMAIN` | 空 | 外网域名，传入后会加 `--trusted-host`；**留空 = 纯本机使用**（127.0.0.1，无需域名） |
 | `DSH_PORT` | `3080` | 监听端口 |
 | `DSH_PROFILE` | `web` | profile 名 |
 
