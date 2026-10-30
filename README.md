@@ -11,7 +11,7 @@ DSH（DeepSeek Harness）Web 服务运维脚本集：一键安装、升级、重
 ## 一键安装（新机器）
 
 ```bash
-git clone https://github.com/zyi07/dsh-scripts.git && cd dsh-scripts
+git clone https://github.com/zyi07/dsh-web-scripts.git && cd dsh-web-scripts
 sudo DSH_DOMAIN=你的域名 bash install.sh
 ```
 
