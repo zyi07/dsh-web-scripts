@@ -1,0 +1,45 @@
+#!/bin/bash
+# dsh-url — 输出当前 DSH Web 的带 token 访问链接
+# 强化点：
+#   1. 先检查服务是否在运行，避免拿到陈旧 token
+#   2. 只匹配"当前进程"启动后打印的 token（按 MainPID 过滤 journal）
+#   3. 支持通过环境变量 DSH_DOMAIN 覆盖域名
+#   4. token 提取失败时给出针对性排查指引
+set -euo pipefail
+
+SERVICE="${DSH_SERVICE:-dsh}"
+DOMAIN="${DSH_DOMAIN:-ddsh.zyiii.dpdns.org}"
+PORT="${DSH_PORT:-443}"
+
+# 1. 服务必须在运行
+if ! systemctl is-active --quiet "$SERVICE"; then
+    echo "❌ 服务 $SERVICE 未运行。请先执行：dsh-restart" >&2
+    exit 1
+fi
+
+# 2. 以当前 MainPID 启动时刻为界，只取该进程日志里的最新 token
+#    （ps lstart 格式 journalctl 不认，先转成标准时间戳）
+MAIN_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
+SINCE="$(date -d "$(ps -o lstart= -p "$MAIN_PID" 2>/dev/null || true)" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+if [ -z "$SINCE" ]; then
+    echo "❌ 无法读取 $SERVICE 主进程（PID=$MAIN_PID）" >&2
+    exit 1
+fi
+
+TOKEN="$(journalctl -u "$SERVICE" --since "$SINCE" --no-pager -o cat 2>/dev/null \
+    | grep -oP 'token=\K[^[:space:]]+' | tail -n 1 || true)"
+
+if [ -z "$TOKEN" ]; then
+    echo "⚠️ 未在当前进程日志中找到 token。" >&2
+    echo "   可能原因：服务启动后尚未打印链接，或 stdout 未进入 journal。" >&2
+    echo "   排查命令：journalctl -u $SERVICE --since \"$SINCE\" --no-pager | grep 'dsh web:'" >&2
+    exit 2
+fi
+
+echo ""
+echo "🔗 当前 DSH 访问链接（$DOMAIN）："
+echo ""
+echo "https://$DOMAIN/?token=${TOKEN}"
+echo ""
+echo "提示：该 token 只在当前进程存活期间有效，重启后会更换；"
+echo "     首次打开后会换取 30 天有效的浏览器 cookie，之后直接访问域名即可。"

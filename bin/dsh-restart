@@ -1,0 +1,62 @@
+#!/bin/bash
+# dsh-restart — 重启 DSH 服务并输出新的带 token 访问链接
+# 强化点：
+#   1. 重启后轮询等待服务就绪（而非固定 sleep），就绪即走，失败即报
+#   2. 只取"本次重启后"新进程打印的 token（按启动时间过滤，不会拿旧 token）
+#   3. 服务重启失败时打印 journal 末尾日志，方便定位
+#   4. 域名/服务名可通过环境变量 DSH_DOMAIN / DSH_SERVICE 覆盖
+set -euo pipefail
+
+SERVICE="${DSH_SERVICE:-dsh}"
+DOMAIN="${DSH_DOMAIN:-ddsh.zyiii.dpdns.org}"
+TIMEOUT="${DSH_START_TIMEOUT:-30}"
+
+# 记录重启前状态，用于区分新旧日志
+OLD_PID="$(systemctl show "$SERVICE" -p MainPID --value 2>/dev/null || echo 0)"
+
+echo "正在重启 $SERVICE 服务..."
+systemctl restart "$SERVICE"
+
+# 轮询等待服务进入 active 且进程 PID 已更换
+STARTED=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    sleep 1
+    if systemctl is-active --quiet "$SERVICE"; then
+        NEW_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
+        if [ -n "$NEW_PID" ] && [ "$NEW_PID" != "0" ] && [ "$NEW_PID" != "$OLD_PID" ]; then
+            STARTED="$NEW_PID"
+            break
+        fi
+    fi
+done
+
+if [ -z "$STARTED" ]; then
+    echo "❌ 重启失败：服务未能在 ${TIMEOUT}s 内就绪。最近日志：" >&2
+    journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null >&2 || true
+    exit 1
+fi
+echo "✅ 服务已重启（PID=$STARTED）"
+
+# 等待新进程打印 token（按新进程启动时间过滤）
+SINCE="$(date -d "$(ps -o lstart= -p "$STARTED")" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+TOKEN=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    TOKEN="$(journalctl -u "$SERVICE" --since "$SINCE" --no-pager -o cat 2>/dev/null \
+        | grep -oP 'token=\K[^[:space:]]+' | tail -n 1 || true)"
+    [ -n "$TOKEN" ] && break
+    sleep 1
+done
+
+if [ -n "$TOKEN" ]; then
+    echo ""
+    echo "🔗 新的访问链接（$DOMAIN）："
+    echo ""
+    echo "https://$DOMAIN/?token=${TOKEN}"
+    echo ""
+    echo "提示：旧浏览器的 cookie 在重启后依然有效（签名密钥持久化），"
+    echo "     无需每次都用新链接；新链接用于新设备或 cookie 失效后登录。"
+else
+    echo "⚠️ 重启完成，但未能在日志中提取到 token。" >&2
+    echo "   排查命令：journalctl -u $SERVICE --since \"$SINCE\" --no-pager | grep 'dsh web:'" >&2
+    exit 2
+fi
