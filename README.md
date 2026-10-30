@@ -31,7 +31,10 @@ git clone https://github.com/zyi07/dsh-web-scripts.git && cd dsh-web-scripts
 sudo DSH_DOMAIN=你的域名 bash install.sh
 ```
 
-域名会作为 `--trusted-host` 传入，配合 nginx 反代（配置见下文）从外网访问。
+域名会作为 `--trusted-host` 传入，配合反向代理从外网访问：
+
+- **CF 托管（DNS/代理/内网穿透）**：**详见 [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)** —— 含 CF 代理 + nginx 和 **Cloudflare Tunnel（无公网 IP 也能用）** 两套方案
+- 纯 nginx 反代配置见下文
 
 `install.sh` 会依次完成：
 
