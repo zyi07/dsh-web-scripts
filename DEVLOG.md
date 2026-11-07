@@ -81,3 +81,16 @@
 - cookie 为 HMAC-SHA256 无状态签名（dsh-auth-<host哈希>），默认 30 天，服务端不存会话 → 重启不踢已登录设备，无历史 cookie 堆积
 ---
 - 修正 update.sh 自检误报：nodesource.com 为官方安装源，加入排除清单
+
+## 2026-11-07 20:55 - git 历史改写，彻底清除隐私域名（用户授权 force-push）
+
+**做了什么：**
+- 两轮 filter-branch：① 全历史 `ddsh.zyiii.dpdns.org` → `dsh.example.com`；② 残留部分字样 `ddsh.zyiii` → `dsh.example`
+- `--force-with-lease`（锚定远端真实值）推送两次，远端 HEAD = 本地 HEAD
+- 清除 refs/original 备份引用 + reflog expire + gc，本地旧对象已回收
+- 改写前已做全量备份：/root/dsh-scripts-history-backup-20261107.bundle（仅本机）
+
+**验证：** `git grep zyiii $(git rev-list main)` 零命中；远端 ls-remote = 616065a
+
+**注意：** 所有 commit hash 已变，其他机器需重新 clone（旧的 git pull 会冲突）
+---
