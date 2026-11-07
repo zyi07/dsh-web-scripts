@@ -8,8 +8,24 @@
 set -euo pipefail
 
 SERVICE="${DSH_SERVICE:-dsh}"
-DOMAIN="${DSH_DOMAIN:-dsh.example.com}"
 TIMEOUT="${DSH_START_TIMEOUT:-30}"
+
+# 解析访问地址（优先级：环境变量 > systemd 单元里的 --trusted-host > 本机回环）
+# 放在重启前解析：重启后立即要用
+PORT="${DSH_PORT:-}"
+if [ -z "$PORT" ]; then
+    PORT="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--port[ =]\K[0-9]+' | head -n1 || true)"
+    PORT="${PORT:-3080}"
+fi
+DOMAIN="${DSH_DOMAIN:-}"
+if [ -z "$DOMAIN" ]; then
+    DOMAIN="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--trusted-host[ =]\K\S+' | head -n1 || true)"
+fi
+if [ -n "$DOMAIN" ]; then
+    BASE_URL="https://$DOMAIN"
+else
+    BASE_URL="http://127.0.0.1:$PORT"
+fi
 
 # 记录重启前状态，用于区分新旧日志
 OLD_PID="$(systemctl show "$SERVICE" -p MainPID --value 2>/dev/null || echo 0)"
@@ -49,9 +65,9 @@ done
 
 if [ -n "$TOKEN" ]; then
     echo ""
-    echo "🔗 新的访问链接（$DOMAIN）："
+    echo "🔗 新的访问链接："
     echo ""
-    echo "https://$DOMAIN/?token=${TOKEN}"
+    echo "${BASE_URL}/?token=${TOKEN}"
     echo ""
     echo "提示：旧浏览器的 cookie 在重启后依然有效（签名密钥持久化），"
     echo "     无需每次都用新链接；新链接用于新设备或 cookie 失效后登录。"

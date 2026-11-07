@@ -8,16 +8,31 @@
 set -euo pipefail
 
 SERVICE="${DSH_SERVICE:-dsh}"
-DOMAIN="${DSH_DOMAIN:-dsh.example.com}"
-PORT="${DSH_PORT:-443}"
-
 # 1. 服务必须在运行
 if ! systemctl is-active --quiet "$SERVICE"; then
     echo "❌ 服务 $SERVICE 未运行。请先执行：dsh-restart" >&2
     exit 1
 fi
 
-# 2. 以当前 MainPID 启动时刻为界，只取该进程日志里的最新 token
+# 2. 解析访问地址（优先级：环境变量 > systemd 单元里的 --trusted-host > 本机回环）
+#    - 探测到 --trusted-host 域名 → 输出 https://域名
+#    - 探测不到（纯本机部署）→ 输出 http://127.0.0.1:端口
+PORT="${DSH_PORT:-}"
+if [ -z "$PORT" ]; then
+    PORT="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--port[ =]\K[0-9]+' | head -n1 || true)"
+    PORT="${PORT:-3080}"
+fi
+DOMAIN="${DSH_DOMAIN:-}"
+if [ -z "$DOMAIN" ]; then
+    DOMAIN="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--trusted-host[ =]\K\S+' | head -n1 || true)"
+fi
+if [ -n "$DOMAIN" ]; then
+    BASE_URL="https://$DOMAIN"
+else
+    BASE_URL="http://127.0.0.1:$PORT"
+fi
+
+# 3. 以当前 MainPID 启动时刻为界，只取该进程日志里的最新 token
 #    （ps lstart 格式 journalctl 不认，先转成标准时间戳）
 MAIN_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
 SINCE="$(date -d "$(ps -o lstart= -p "$MAIN_PID" 2>/dev/null || true)" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
@@ -37,9 +52,9 @@ if [ -z "$TOKEN" ]; then
 fi
 
 echo ""
-echo "🔗 当前 DSH 访问链接（$DOMAIN）："
+echo "🔗 当前 DSH 访问链接："
 echo ""
-echo "https://$DOMAIN/?token=${TOKEN}"
+echo "${BASE_URL}/?token=${TOKEN}"
 echo ""
 echo "提示：该 token 只在当前进程存活期间有效，重启后会更换；"
 echo "     首次打开后会换取 30 天有效的浏览器 cookie，之后直接访问域名即可。"

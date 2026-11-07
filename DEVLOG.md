@@ -48,3 +48,21 @@
 - cloudflared login/create/route dns/config.yml/service install 流程 → 多来源交叉核实
 - WSL 篇同款声明：Tunnel 方案未在无公网机器实测，流程按官方标准编写
 ---
+
+## 2026-11-07 14:55 - 修复多机输出同一域名的 bug
+
+**问题（用户实测发现）：** `dsh-url` / `dsh-restart` 第 11 行硬编码了
+`DOMAIN="${DSH_DOMAIN:-dsh.example.com}"`，任何机器不传 DSH_DOMAIN
+都会输出我的域名——不同机器域名不同，全部输出错误链接。
+
+**修复：** 访问地址自动探测，优先级 `DSH_DOMAIN 环境变量 > systemd 单元的
+--trusted-host 参数 > http://127.0.0.1:端口`；端口同样从单元 `--port` 探测。
+
+**验证（三条路径全部实测）：**
+- A. 本机单元有 trusted-host → https://dsh.example.com ✓
+- B. DSH_DOMAIN=other.example.com 覆盖 → https://other.example.com ✓
+- C. 临时假服务（无 trusted-host，--port 3000）→ http://127.0.0.1:3000 ✓
+  （无 --port 的单元回落默认 3080，亦验证）
+
+**涉及文件：** `bin/dsh-url` `bin/dsh-restart`（去掉硬编码，加 systemctl cat 解析）、README 环境变量表
+---

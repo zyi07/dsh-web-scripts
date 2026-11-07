@@ -108,9 +108,17 @@ server {
 | 变量 | 默认值 |
 |---|---|
 | `DSH_SERVICE` | `dsh` |
-| `DSH_DOMAIN` | `dsh.example.com`（建议改掉） |
+| `DSH_PORT` | 从 systemd 单元的 `--port` 自动探测，无则 `3080` |
 | `DSH_START_TIMEOUT` | `30`（dsh-restart） |
 | `DSH_NPM_PACKAGE` | `@deepseek-ai/dsh`（dsh-upgrade） |
+
+**访问地址自动探测**（`dsh-url` / `dsh-restart`）：
+
+1. `DSH_DOMAIN` 环境变量（最高优先级）
+2. systemd 单元里的 `--trusted-host` 参数 → 输出 `https://域名`
+3. 都没有（纯本机部署）→ 输出 `http://127.0.0.1:端口`
+
+不硬编码任何域名，多台机器各自输出各自的地址。
 
 ## 许可
 
