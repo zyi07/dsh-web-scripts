@@ -30,7 +30,8 @@ $SUDO install -m 755 bin/dsh-url bin/dsh-restart bin/dsh-upgrade bin/dsh-start b
 
 echo "==> 防泄露自检（扫描脚本中是否有硬编码域名）"
 LEAK="$(grep -rnE '[a-z0-9-]+\.(com|net|org|cn|dev|app|io|dpdns\.org)' bin/ install.sh update.sh 2>/dev/null \
-    | grep -v 'ddsh\.example\.com' | grep -v 'example\.com' | grep -v 'github\.com' | grep -v 'npmjs' || true)"
+    | grep -v 'ddsh\.example\.com' | grep -v 'example\.com' | grep -v 'github\.com' \
+    | grep -v 'nodesource\.com' | grep -v 'npmjs' || true)"
 if [ -n "$LEAK" ]; then
     echo "⚠️ 发现疑似硬编码域名，请检查：" >&2
     echo "$LEAK" >&2

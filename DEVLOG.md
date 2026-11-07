@@ -80,3 +80,4 @@
 - 签名密钥首次启动随机生成，写入 ~/.dsh/.credentials.yaml（client-connection/browser-session），已存在则复用 → 持久化
 - cookie 为 HMAC-SHA256 无状态签名（dsh-auth-<host哈希>），默认 30 天，服务端不存会话 → 重启不踢已登录设备，无历史 cookie 堆积
 ---
+- 修正 update.sh 自检误报：nodesource.com 为官方安装源，加入排除清单
