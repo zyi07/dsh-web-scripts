@@ -52,17 +52,31 @@
 ## 2026-11-07 14:55 - 修复多机输出同一域名的 bug
 
 **问题（用户实测发现）：** `dsh-url` / `dsh-restart` 第 11 行硬编码了
-`DOMAIN="${DSH_DOMAIN:-dsh.example.com}"`，任何机器不传 DSH_DOMAIN
-都会输出我的域名——不同机器域名不同，全部输出错误链接。
+`DOMAIN="${DSH_DOMAIN:-<旧硬编码域名，已清除>}"`，任何机器不传 DSH_DOMAIN
+都会输出脚本作者自己的域名——不同机器域名不同，全部输出错误链接。
 
 **修复：** 访问地址自动探测，优先级 `DSH_DOMAIN 环境变量 > systemd 单元的
 --trusted-host 参数 > http://127.0.0.1:端口`；端口同样从单元 `--port` 探测。
 
 **验证（三条路径全部实测）：**
-- A. 本机单元有 trusted-host → https://dsh.example.com ✓
+- A. 本机单元有 trusted-host → https://<单元内配置的域名> ✓
 - B. DSH_DOMAIN=other.example.com 覆盖 → https://other.example.com ✓
 - C. 临时假服务（无 trusted-host，--port 3000）→ http://127.0.0.1:3000 ✓
   （无 --port 的单元回落默认 3080，亦验证）
 
 **涉及文件：** `bin/dsh-url` `bin/dsh-restart`（去掉硬编码，加 systemctl cat 解析）、README 环境变量表
+---
+
+## 2026-11-07 20:40 - 启停脚本 + 一键更新 + 使用手册
+
+**做了什么：**
+- 新增 `bin/dsh-start` / `bin/dsh-stop`（启停 + token 等待 + 地址自动探测，与 dsh-url 同一套逻辑）；临时假服务端到端实测通过（stop 确认 inactive、start 输出链接、幂等分支 ✓）
+- 新增 `update.sh`：git pull --ff-only → 重装 5 个脚本 → 硬编码域名扫描自检；自复制到 /tmp 再执行规避 git pull 改自身文件的竞态
+- 新增 `docs/USAGE.md`：全部 7 个脚本用法、环境变量表、FAQ（改域名步骤、签名密钥/cookie 机制、网页会话内执行 stop 的现象）
+- README 日常命令表补充 dsh-start/dsh-stop，链接 USAGE.md，新增"脚本怎么更新"小节
+- 清除 DEVLOG 中的真实域名字样（工作区已无 dsh.example；README/install.sh 用的是 example.com 占位符）
+
+**事实核查（#4 cookie 问题，读 dsh-client-connection 源码）：**
+- 签名密钥首次启动随机生成，写入 ~/.dsh/.credentials.yaml（client-connection/browser-session），已存在则复用 → 持久化
+- cookie 为 HMAC-SHA256 无状态签名（dsh-auth-<host哈希>），默认 30 天，服务端不存会话 → 重启不踢已登录设备，无历史 cookie 堆积
 ---

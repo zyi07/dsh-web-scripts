@@ -1,0 +1,72 @@
+#!/bin/bash
+# dsh-start — 一键启动 DSH 服务并输出带 token 的访问链接
+# 用法：dsh-start  （或 DSH_SERVICE=服务名 dsh-start）
+set -euo pipefail
+
+SERVICE="${DSH_SERVICE:-dsh}"
+TIMEOUT="${DSH_START_TIMEOUT:-30}"
+
+# 访问地址自动探测（优先级：DSH_DOMAIN > 单元里的 --trusted-host > 本机回环）
+PORT="${DSH_PORT:-}"
+if [ -z "$PORT" ]; then
+    PORT="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--port[ =]\K[0-9]+' | head -n1 || true)"
+    PORT="${PORT:-3080}"
+fi
+DOMAIN="${DSH_DOMAIN:-}"
+if [ -z "$DOMAIN" ]; then
+    DOMAIN="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--trusted-host[ =]\K\S+' | head -n1 || true)"
+fi
+if [ -n "$DOMAIN" ]; then
+    BASE_URL="https://$DOMAIN"
+else
+    BASE_URL="http://127.0.0.1:$PORT"
+fi
+
+if systemctl is-active --quiet "$SERVICE"; then
+    echo "$SERVICE 已在运行，无需启动。获取链接请执行：dsh-url"
+    exit 0
+fi
+
+echo "正在启动 $SERVICE ..."
+systemctl start "$SERVICE"
+
+# 轮询等待服务进入 active
+STARTED=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    if systemctl is-active --quiet "$SERVICE"; then
+        STARTED="$(systemctl show "$SERVICE" -p MainPID --value)"
+        break
+    fi
+    sleep 1
+done
+
+if [ -z "$STARTED" ] || [ "$STARTED" = "0" ]; then
+    echo "❌ 启动失败：服务未能在 ${TIMEOUT}s 内就绪。最近日志：" >&2
+    journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null >&2 || true
+    exit 1
+fi
+echo "✅ 服务已启动（PID=$STARTED）"
+
+# 等待新进程打印 token（按本进程启动时间过滤）
+SINCE="$(date -d "$(ps -o lstart= -p "$STARTED")" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+TOKEN=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    TOKEN="$(journalctl -u "$SERVICE" --since "$SINCE" --no-pager -o cat 2>/dev/null \
+        | grep -oP 'token=\K[^[:space:]]+' | tail -n 1 || true)"
+    [ -n "$TOKEN" ] && break
+    sleep 1
+done
+
+if [ -n "$TOKEN" ]; then
+    echo ""
+    echo "🔗 访问链接："
+    echo ""
+    echo "${BASE_URL}/?token=${TOKEN}"
+    echo ""
+    echo "提示：重启不会使已登录设备的 cookie 失效（签名密钥持久化），"
+    echo "     新链接用于新设备或 cookie 过期后登录。"
+else
+    echo "⚠️ 服务已启动，但 ${TIMEOUT}s 内未在日志中找到 token。" >&2
+    echo "   稍后可执行：dsh-url 重新获取。" >&2
+    exit 2
+fi

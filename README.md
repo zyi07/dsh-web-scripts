@@ -41,7 +41,7 @@ sudo DSH_DOMAIN=你的域名 bash install.sh
 1. 检查/安装 Node.js >= 20（NodeSource，仅 apt 系统）
 2. `npm install -g @deepseek-ai/dsh@latest` 安装 DSH 核心
 3. 修复 npm 拦截的原生模块构建（node-pty / koffi 预编译）
-4. 安装 `dsh-restart` / `dsh-url` / `dsh-upgrade` 到 `/usr/local/bin`
+4. 安装全部运维脚本（`dsh-url` / `dsh-restart` / `dsh-start` / `dsh-stop` / `dsh-upgrade`）到 `/usr/local/bin`
 5. 生成 systemd 单元（若已有则保留现有配置）
 6. 启动并开机自启
 7. 打印带 token 的访问链接
@@ -62,7 +62,20 @@ sudo DSH_DOMAIN=你的域名 bash install.sh
 |---|---|
 | `dsh-url` | 输出当前带 token 的访问链接（只认当前进程的日志，不会拿旧 token） |
 | `dsh-restart` | 重启服务，轮询等待就绪，输出新链接；失败时打印 journal 末尾 |
+| `dsh-start` | 启动服务并输出链接（配合 `dsh-stop` 手动启停） |
+| `dsh-stop` | 停止服务（显式 stop 后 systemd 不会自动拉起） |
 | `dsh-upgrade` | 升级核心 → 补跑原生模块预编译 → 配置冒烟测试 → 通过才重启 |
+
+全部脚本的环境变量、FAQ（改域名、cookie/签名密钥机制）等：
+**详见 [docs/USAGE.md](docs/USAGE.md)**。
+
+### 脚本怎么更新（已安装过的机器）
+
+```bash
+cd dsh-web-scripts && bash update.sh
+```
+
+自动 `git pull` + 重装命令 + 防泄露自检，一条命令完成。
 
 ### 升级的安全性
 
