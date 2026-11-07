@@ -74,7 +74,7 @@
 - 新增 `update.sh`：git pull --ff-only → 重装 5 个脚本 → 硬编码域名扫描自检；自复制到 /tmp 再执行规避 git pull 改自身文件的竞态
 - 新增 `docs/USAGE.md`：全部 7 个脚本用法、环境变量表、FAQ（改域名步骤、签名密钥/cookie 机制、网页会话内执行 stop 的现象）
 - README 日常命令表补充 dsh-start/dsh-stop，链接 USAGE.md，新增"脚本怎么更新"小节
-- 清除 DEVLOG 中的真实域名字样（工作区已无 dsh.example；README/install.sh 用的是 example.com 占位符）
+- 清除 DEVLOG 中的真实域名字样（工作区已无隐私域名残留；README/install.sh 用的是 example.com 占位符）
 
 **事实核查（#4 cookie 问题，读 dsh-client-connection 源码）：**
 - 签名密钥首次启动随机生成，写入 ~/.dsh/.credentials.yaml（client-connection/browser-session），已存在则复用 → 持久化
