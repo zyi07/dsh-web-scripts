@@ -22,7 +22,7 @@ for arg in "$@"; do
         --add) ADD_ONLY=1 ;;
         --no-restart) NO_RESTART=1 ;;
         --help|-h)
-            sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         -*) echo "未知参数：$arg（--help 查看用法）" >&2; exit 1 ;;
         *)
