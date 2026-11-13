@@ -94,3 +94,25 @@
 
 **注意：** 所有 commit hash 已变，其他机器需重新 clone（旧的 git pull 会冲突）
 ---
+
+## 2026-11-13 09:50 - 修复 dsh-upgrade 检测不到新版（RC 只发 next 标签）
+
+**用户报障：** DSH 已发布 0.2.2-rc.2，但 `dsh-upgrade` 一直提示"已是最新版本"。
+
+**根因（实测确认）：** npm dist-tags 为 `latest=0.2.2-rc.1` / `next=0.2.2-rc.2` /
+`alpha=0.2.2-alpha.3`——上游把新 RC 只发到 `next`，`latest` 滞后。而脚本只查
+`dist-tags.latest`，因此永远看不到 rc.2。不是网络/registry/缓存问题。
+
+**修复：**
+- 一次请求拉取全部 dist-tags，按"当前版本所在渠道"选目标：rc/beta→next、
+  alpha→alpha、无后缀→latest；支持 `DSH_CHANNEL` 强制渠道、`DSH_VERSION` 指定版本
+- 用自实现 semver 比较 `version_gt`（`sort -V` 会把 0.2.2-rc.2 判作大于 0.2.2，
+  违反 semver 预发布规则，故不能用）
+- 目标比当前旧时跳过不降级；新增 `--check/--dry-run` 试运行
+- 输出附带 npm 三个标签的实际指向，便于下次排查
+
+**验证：** 11 项 version_gt 单测全过；真实环境 `--check` 正确检出 rc.1→rc.2；
+桩程序覆盖 5 种渠道分支（稳定/rc 最新/alpha/比线上新/指定旧版）均符合预期；
+非法渠道退出码 1
+
+**涉及文件：** `bin/dsh-upgrade`、`docs/USAGE.md`

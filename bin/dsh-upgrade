@@ -1,33 +1,131 @@
 #!/bin/bash
 # dsh-upgrade — 升级 DSH 核心到 npm 最新版并安全重启
 # 强化点：
-#   1. 升级前记录当前版本，失败可回滚（保留旧版本号）
-#   2. npm 拦截原生构建脚本时，自动补跑 node-pty / koffi 预编译
-#   3. 升级后先做 --dump-config 冒烟测试，再重启服务
-#   4. 自动输出新访问链接
+#   1. 版本检测覆盖全部 dist-tag（latest/next/alpha）——上游 RC 版本常只发到 next
+#   2. semver 比较（预发布版 < 同号正式版，rc.10 > rc.2），不会误判/降级
+#   3. 升级前记录当前版本，失败可回滚（保留旧版本号）
+#   4. npm 拦截原生构建脚本时，自动补跑 node-pty / koffi 预编译
+#   5. 升级后先做 --dump-config 冒烟测试，再重启服务
+# 用法：
+#   dsh-upgrade            升级到当前渠道的最新版
+#   dsh-upgrade --check    只检查有无新版本，不安装（试运行）
+#   DSH_CHANNEL=next dsh-upgrade   强制指定渠道（latest|next|alpha）
+#   DSH_VERSION=0.2.2-rc.2 dsh-upgrade   安装指定版本
 set -euo pipefail
 
 SERVICE="${DSH_SERVICE:-dsh}"
 PKG="${DSH_NPM_PACKAGE:-@deepseek-ai/dsh}"
+CHECK_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --check|-c|--dry-run) CHECK_ONLY=1 ;;
+        --help|-h)
+            sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *) echo "未知参数：$arg（用 --help 查看用法）" >&2; exit 1 ;;
+    esac
+done
 
 CURRENT="$(dsh --version 2>/dev/null || echo '未知')"
-LATEST="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
 
-if [ -z "$LATEST" ]; then
-    echo "❌ 无法查询 npm 上的最新版本，请检查网络后重试。" >&2
+# ---- semver 比较：version_gt A B 成立表示 A 比 B 新 ----
+version_gt() {
+    local a="$1" b="$2"
+    [ "$a" = "$b" ] && return 1
+    local abase="${a%%-*}" bbase="${b%%-*}" apre="" bpre=""
+    [[ "$a" == *-* ]] && apre="${a#*-}"
+    [[ "$b" == *-* ]] && bpre="${b#*-}"
+    if [ "$abase" != "$bbase" ]; then
+        [ "$(printf '%s\n%s\n' "$abase" "$bbase" | sort -V | tail -1)" = "$abase" ]
+        return
+    fi
+    [ -z "$apre" ] && return 0   # 同号下正式版 > 预发布版
+    [ -z "$bpre" ] && return 1
+    local arank=9 brank=9
+    case "$apre" in alpha*) arank=1 ;; beta*) arank=2 ;; rc*) arank=3 ;; esac
+    case "$bpre" in alpha*) brank=1 ;; beta*) brank=2 ;; rc*) brank=3 ;; esac
+    if [ "$arank" -ne "$brank" ]; then
+        [ "$arank" -gt "$brank" ]
+        return
+    fi
+    [ "$(printf '%s\n%s\n' "$apre" "$bpre" | sort -V | tail -1)" = "$apre" ]
+}
+
+# ---- 拉取全部 dist-tag（一次网络请求）----
+TAGS_JSON="$(npm view "$PKG" dist-tags --json 2>/dev/null || true)"
+if [ -z "$TAGS_JSON" ]; then
+    echo "❌ 无法查询 npm 上的版本信息，请检查网络或 registry 后重试。" >&2
+    echo "   当前 registry：$(npm config get registry)" >&2
+    exit 1
+fi
+tag_of() { printf '%s\n' "$TAGS_JSON" | grep -oP "\"$1\"\s*:\s*\"\K[^\"]+" | head -n1 || true; }
+
+LATEST="$(tag_of latest)"
+NEXT="$(tag_of next)"
+ALPHA="$(tag_of alpha)"
+
+# ---- 选择目标版本 ----
+# 显式指定版本 > 显式指定渠道 > auto（跟随当前版本所在渠道，不跨渠道跳）
+if [ -n "${DSH_VERSION:-}" ]; then
+    TARGET="$DSH_VERSION"; CHANNEL="指定版本"
+elif [ -n "${DSH_CHANNEL:-}" ]; then
+    CHANNEL="$DSH_CHANNEL"
+    case "$CHANNEL" in
+        latest) TARGET="$LATEST" ;;
+        next)   TARGET="$NEXT" ;;
+        alpha)  TARGET="$ALPHA" ;;
+        *) echo "❌ DSH_CHANNEL 只能是 latest / next / alpha" >&2; exit 1 ;;
+    esac
+else
+    case "$CURRENT" in
+        *-rc*|*-beta*) CHANNEL="next（跟随 RC 渠道）"; TARGET="$NEXT" ;;
+        *-alpha*)      CHANNEL="alpha（跟随 alpha 渠道）"; TARGET="$ALPHA" ;;
+        *)             CHANNEL="latest（稳定渠道）"; TARGET="$LATEST" ;;
+    esac
+    # 该渠道标签缺失时回落到 latest
+    [ -z "$TARGET" ] && { TARGET="$LATEST"; CHANNEL="$CHANNEL，无对应标签，回落 latest"; }
+fi
+
+if [ -z "$TARGET" ]; then
+    echo "❌ 未能确定目标版本。npm dist-tags 现状：" >&2
+    printf '   latest=%s next=%s alpha=%s\n' "${LATEST:-无}" "${NEXT:-无}" "${ALPHA:-无}" >&2
     exit 1
 fi
 
 echo "当前版本：$CURRENT"
-echo "最新版本：$LATEST"
+echo "最新版本：$TARGET（渠道：$CHANNEL）"
+# 目标不是 latest 标签时，说明各标签实际指向，避免"为什么和 npm 页面不一样"的困惑
+if [ -n "$LATEST" ] && [ "$TARGET" != "$LATEST" ]; then
+    printf '           npm dist-tags：latest=%s / next=%s / alpha=%s\n' \
+        "${LATEST:-无}" "${NEXT:-无}" "${ALPHA:-无}"
+fi
+# latest 标签指向预发布版时给个提示（上游 RC 阶段的常见情况）
+case "$CURRENT" in
+    *-alpha*|*-beta*|*-rc*) ;;
+    *) case "$TARGET" in *-alpha*|*-beta*|*-rc*)
+        echo "           注意：latest 标签当前指向预发布版 $TARGET，上游处于 RC 阶段。" ;;
+    esac ;;
+esac
 
-if [ "$CURRENT" = "$LATEST" ]; then
+# ---- 比较 ----
+if [ "$CURRENT" = "$TARGET" ]; then
     echo "✅ 已是最新版本，无需升级。"
     exit 0
 fi
+if ! version_gt "$TARGET" "$CURRENT"; then
+    echo "⚠️ 目标版本 $TARGET 不比当前版本 $CURRENT 新，已跳过（不会降级）。"
+    echo "   如需强制安装指定版本：DSH_VERSION=$TARGET dsh-upgrade"
+    exit 0
+fi
 
-echo "开始升级 $PKG $CURRENT → $LATEST ..."
-if ! npm install -g "$PKG@$LATEST" 2>&1 | grep -v "^npm warn"; then
+if [ "$CHECK_ONLY" = "1" ]; then
+    echo "🔍 检查模式：可升级 $CURRENT → $TARGET（未执行安装）"
+    echo "   执行升级：dsh-upgrade"
+    exit 0
+fi
+
+echo "开始升级 $PKG $CURRENT → $TARGET ..."
+if ! npm install -g "$PKG@$TARGET" 2>&1 | grep -v "^npm warn"; then
     echo "❌ npm 安装失败，保留在旧版本 $CURRENT。" >&2
     exit 1
 fi
@@ -63,4 +161,10 @@ if ! dsh --profile "${DSH_PROFILE:-web}" --dump-config >/dev/null 2>/tmp/dsh-upg
 fi
 echo "  ✓ 配置组装正常"
 
-dsh-restart
+# 优先用仓库内的 dsh-restart（本地开发/更新后未安装时也可用）
+if command -v dsh-restart >/dev/null 2>&1; then
+    dsh-restart
+else
+    systemctl restart "$SERVICE" && echo "✅ 服务已重启"
+    echo "   获取访问链接：dsh-url"
+fi

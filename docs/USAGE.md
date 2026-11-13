@@ -73,11 +73,27 @@ dsh-start     # 启动；等待就绪并输出带 token 链接；已运行时提
 ## dsh-upgrade — 升级 DSH 核心
 
 ```bash
-dsh-upgrade
+dsh-upgrade            # 升级到当前渠道最新版
+dsh-upgrade --check    # 只检查（试运行），不安装
+DSH_CHANNEL=next dsh-upgrade      # 强制走 next 渠道（RC 版）
+DSH_CHANNEL=latest dsh-upgrade    # 强制走 stable 渠道
+DSH_VERSION=0.2.2-rc.2 dsh-upgrade   # 安装指定版本
 ```
 
-流程：比较版本 → `npm install -g @deepseek-ai/dsh@latest` → 补跑原生模块预编译 →
-对**新代码**做 `--dump-config` 冒烟测试 → 测试通过才重启（失败不重启，并给出回滚命令）。
+**渠道自动选择**（DSH 处于 RC 阶段时，新版本常只发到 `next` 标签，`latest` 会滞后）：
+
+| 当前版本 | 跟随的 npm 标签 |
+|---|---|
+| `0.2.2-rc.N` / `-beta.N` | `next` |
+| `0.2.2-alpha.N` | `alpha` |
+| 无预发布后缀（如 `0.2.1`） | `latest` |
+
+- 版本比较按 semver：预发布 < 同号正式版；`rc.10` > `rc.2`（不是字符串比较）
+- 目标版本不比当前新时**自动跳过，不会降级**；要强制装旧版用 `DSH_VERSION=...`
+- `--check` 输出目标版本、渠道和 npm 三个标签的实际指向，排查"为什么检测不到新版"时用
+
+流程：`npm install -g $PKG@$TARGET` → 补跑原生模块预编译 → 对**新代码**做
+`--dump-config` 冒烟测试 → 测试通过才重启（失败不重启，并给出回滚命令）。
 
 ---
 
