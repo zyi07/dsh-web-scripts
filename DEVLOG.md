@@ -116,3 +116,25 @@
 非法渠道退出码 1
 
 **涉及文件：** `bin/dsh-upgrade`、`docs/USAGE.md`
+
+## 2026-11-13 10:05 - 换域名后仍输出旧域名：新增 dsh-domain + 解析校验
+
+**用户报障：** 另一台机器 dsh-upgrade 后输出的访问域名是旧域名（zyiii zone 已 NXDOMAIN）。
+
+**根因：** 不是脚本 bug——`dsh-url` 忠实输出本机 systemd 单元 `--trusted-host` 里的值，
+那台机器单元里还挂着已失效的旧域名。DSH 用 trusted-host 做 Host 白名单，换域名必须同步改单元。
+
+**修复：**
+- 新增 `bin/dsh-domain`：查看（列出每个 trusted-host 的解析状态）/ 更换（写
+  /etc/dsh-url.conf + 重建 trusted-host：丢弃解析不到的旧域名、保留 IP:端口 与仍可解析域名、
+  追加新域名 + daemon-reload + 重启）/ `--add` 多域名 / `--no-restart`；改前自动备份单元，幂等
+- `dsh-url` / `dsh-restart` / `dsh-start` 统一解析优先级：DSH_BASE_URL > /etc/dsh-url.conf >
+  DSH_DOMAIN > 单元 trusted-host（**多个时优先选能解析的**）> 127.0.0.1；域名解析不到时
+  向 stderr 告警并提示用 dsh-domain
+- 修 install.sh 漏装 dsh-start/dsh-stop 的问题（改为循环安装 6 个脚本），update.sh 同步
+- 文档：USAGE.md 增 dsh-domain 章节、DSH_BASE_URL/DSH_URL_CONF 变量、重写"怎么修改域名"FAQ
+- 顺带提交本机工作区既有的 /etc/dsh-url.conf 支持改动（同期未入库）
+
+**验证：** 4 个场景用假 systemd 单元实测——conf 指向活域名输出正确；conf 指向死域名触发告警；
+单元含死域名+IP:端口+活域名时选活的；全部失效时用第一个并告警。dsh-domain 的
+状态/更换/幂等/--add 四种路径均实测（死域名被移除、IP:端口 保留、新域名追加）

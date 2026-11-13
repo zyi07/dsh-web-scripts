@@ -1,0 +1,154 @@
+#!/bin/bash
+# dsh-domain — 查看或更换 DSH 的对外访问域名（含清理失效旧域名）
+# 用法：
+#   dsh-domain                    查看当前域名、单元里的 trusted-host 及解析状态
+#   sudo dsh-domain 新域名         设为对外域名：写 /etc/dsh-url.conf、更新单元
+#                                 --trusted-host（丢弃解析不到的旧域名，保留 IP:端口）、
+#                                 重启服务并输出新链接
+#   sudo dsh-domain --add 域名     只追加，不清理旧条目（多域名并用时）
+#   sudo dsh-domain --no-restart 域名   只改配置不重启
+# 说明：DSH 用 --trusted-host 做 Host 白名单，浏览器访问的域名必须命中其中之一，
+#       否则页面能开但 /api 全部被拒。换域名务必跑本脚本，别只改 DNS。
+set -euo pipefail
+
+SERVICE="${DSH_SERVICE:-dsh}"
+CONF="${DSH_URL_CONF:-/etc/dsh-url.conf}"
+ADD_ONLY=0
+NO_RESTART=0
+NEW_DOMAIN=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --add) ADD_ONLY=1 ;;
+        --no-restart) NO_RESTART=1 ;;
+        --help|-h)
+            sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        -*) echo "未知参数：$arg（--help 查看用法）" >&2; exit 1 ;;
+        *)
+            if [ -n "$NEW_DOMAIN" ]; then echo "只能指定一个域名" >&2; exit 1; fi
+            NEW_DOMAIN="$arg" ;;
+    esac
+done
+
+UNIT_FILE="$(systemctl show "$SERVICE" -p FragmentPath --value 2>/dev/null || true)"
+if [ -z "$UNIT_FILE" ] || [ ! -f "$UNIT_FILE" ]; then
+    echo "❌ 找不到 $SERVICE 的 systemd 单元文件（先运行 install.sh 安装）" >&2
+    exit 1
+fi
+
+check_dns() { getent hosts "$1" >/dev/null 2>&1; }
+
+# ---------- 无参数：查看现状 ----------
+if [ -z "$NEW_DOMAIN" ]; then
+    echo "服务单元：$UNIT_FILE"
+    echo ""
+    echo "对外地址配置（/etc/dsh-url.conf）："
+    if [ -r "$CONF" ]; then
+        grep -E '^PUBLIC_BASE_URL=' "$CONF" | sed 's/^/  /' || echo "  （未设置）"
+    else
+        echo "  （$CONF 不存在，将回落到单元里的 trusted-host）"
+    fi
+    echo ""
+    echo "单元里的 --trusted-host（DSH 的 Host 白名单）："
+    HOSTS="$(grep -oP -- '--trusted-host[ =]\K\S+' "$UNIT_FILE" 2>/dev/null || true)"
+    if [ -z "$HOSTS" ]; then
+        echo "  （无，纯本机模式：仅 127.0.0.1 可访问）"
+    else
+        for h in $HOSTS; do
+            case "$h" in
+                *:*) echo "  $h  （IP:端口，跳过 DNS 检查）" ;;
+                *)   if check_dns "$h"; then echo "  $h  ✓ 解析正常"
+                     else echo "  $h  ❌ 解析失败（失效域名，建议用 dsh-domain 新域名 清理）"; fi ;;
+            esac
+        done
+    fi
+    echo ""
+    echo "更改域名：sudo dsh-domain 新域名"
+    exit 0
+fi
+
+# ---------- 改域名 ----------
+if [ "$(id -u)" != "0" ]; then
+    echo "❌ 需要 root 权限：sudo dsh-domain $NEW_DOMAIN" >&2
+    exit 1
+fi
+if ! printf '%s' "$NEW_DOMAIN" | grep -qP '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'; then
+    echo "❌ 域名格式不合法：$NEW_DOMAIN（只要主机名，不要带 https:// 或路径）" >&2
+    exit 1
+fi
+if ! check_dns "$NEW_DOMAIN"; then
+    echo "⚠️ 注意：$NEW_DOMAIN 目前解析不到（DNS 可能尚未生效）。配置仍会写入。" >&2
+    echo "   解析生效后重新执行 dsh-restart 即可。" >&2
+fi
+
+# 1) 写 /etc/dsh-url.conf（dsh-url/restart/start 优先读它）
+if [ -f "$CONF" ]; then
+    if grep -q '^PUBLIC_BASE_URL=' "$CONF"; then
+        sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://$NEW_DOMAIN|" "$CONF"
+    else
+        printf 'PUBLIC_BASE_URL=https://%s\n' "$NEW_DOMAIN" >> "$CONF"
+    fi
+else
+    printf 'PUBLIC_BASE_URL=https://%s\n' "$NEW_DOMAIN" > "$CONF"
+fi
+chmod 644 "$CONF"
+echo "✓ 已写入 $CONF：PUBLIC_BASE_URL=https://$NEW_DOMAIN"
+
+# 2) 重建 ExecStart 的 --trusted-host 列表
+OLD_EXEC="$(grep -m1 '^ExecStart=' "$UNIT_FILE")"
+NEW_EXEC="$(printf '%s\n' "$OLD_EXEC" | sed -E 's/ --trusted-host [^ ]+//g')"
+KEPT=""
+DROPPED=""
+if [ "$ADD_ONLY" = "1" ]; then
+    KEPT="$(printf '%s\n' "$OLD_EXEC" | grep -oP -- '--trusted-host[ =]\K\S+' || true)"
+else
+    for h in $(printf '%s\n' "$OLD_EXEC" | grep -oP -- '--trusted-host[ =]\K\S+' || true); do
+        case "$h" in
+            *:*) KEPT="$KEPT $h" ;;                       # IP:端口 保留
+            *)   if check_dns "$h"; then KEPT="$KEPT $h"; # 仍可解析的域名保留
+                 else DROPPED="$DROPPED $h"; fi ;;        # 失效域名丢弃
+        esac
+    done
+fi
+for h in $KEPT; do
+    [ "$h" = "$NEW_DOMAIN" ] && continue
+    NEW_EXEC="$NEW_EXEC --trusted-host $h"
+done
+NEW_EXEC="$NEW_EXEC --trusted-host $NEW_DOMAIN"
+# 输出用：多行压成一行，便于阅读
+KEPT_FMT="$(printf '%s' "$KEPT" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+DROPPED_FMT="$(printf '%s' "$DROPPED" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+
+# 幂等：内容没变就不重写
+if [ "$NEW_EXEC" = "$OLD_EXEC" ]; then
+    echo "✓ 单元已含该域名，无需修改"
+else
+    cp -a "$UNIT_FILE" "${UNIT_FILE}.bak-$(date +%Y%m%d-%H%M%S)"
+    python3 - "$UNIT_FILE" "$OLD_EXEC" "$NEW_EXEC" <<'PY'
+import sys, pathlib
+path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
+p = pathlib.Path(path); s = p.read_text()
+p.write_text(s.replace(old, new, 1))
+PY
+    echo "✓ 已更新单元：$UNIT_FILE"
+    [ -n "$DROPPED_FMT" ] && echo "  已移除失效域名：$DROPPED_FMT"
+    [ -n "$KEPT_FMT" ] && echo "  保留：$KEPT_FMT"
+fi
+
+systemctl daemon-reload
+echo "✓ 已 daemon-reload"
+
+# 3) 重启生效
+if [ "$NO_RESTART" = "1" ]; then
+    echo ""
+    echo "配置已更新（未重启）。生效请执行：dsh-restart"
+    exit 0
+fi
+echo ""
+if command -v dsh-restart >/dev/null 2>&1; then
+    exec dsh-restart
+else
+    systemctl restart "$SERVICE"
+    echo "✅ 服务已重启，获取链接：dsh-url"
+fi

@@ -72,10 +72,10 @@ node -e "require('koffi')" >/dev/null 2>&1 && echo "   ✓ koffi OK" || echo "  
 node -e "require('node-pty')" >/dev/null 2>&1 && echo "   ✓ node-pty OK" || echo "   ⚠️ node-pty 加载失败"
 
 echo "==> 4/7 安装命令行工具到 /usr/local/bin"
-install -m 755 "$SCRIPT_DIR/bin/dsh-restart" /usr/local/bin/dsh-restart
-install -m 755 "$SCRIPT_DIR/bin/dsh-url" /usr/local/bin/dsh-url
-install -m 755 "$SCRIPT_DIR/bin/dsh-upgrade" /usr/local/bin/dsh-upgrade
-echo "   ✓ dsh-restart / dsh-url / dsh-upgrade"
+for f in dsh-url dsh-restart dsh-start dsh-stop dsh-upgrade dsh-domain; do
+    install -m 755 "$SCRIPT_DIR/bin/$f" "/usr/local/bin/$f"
+done
+echo "   ✓ dsh-url / dsh-restart / dsh-start / dsh-stop / dsh-upgrade / dsh-domain"
 
 echo "==> 5/7 配置 systemd 服务"
 UNIT=/etc/systemd/system/${SERVICE}.service
@@ -133,4 +133,7 @@ echo ""
 echo "常用命令："
 echo "   dsh-url      查看当前访问链接"
 echo "   dsh-restart  重启并输出新链接"
-echo "   dsh-upgrade  升级到最新版"
+echo "   dsh-start    启动服务（配合 dsh-stop）"
+echo "   dsh-stop     停止服务"
+echo "   dsh-upgrade  升级到最新版（--check 仅检查）"
+echo "   dsh-domain   查看/更换对外域名"

@@ -10,21 +10,42 @@ set -euo pipefail
 SERVICE="${DSH_SERVICE:-dsh}"
 TIMEOUT="${DSH_START_TIMEOUT:-30}"
 
-# 解析访问地址（优先级：环境变量 > systemd 单元里的 --trusted-host > 本机回环）
-# 放在重启前解析：重启后立即要用
+# 解析访问地址（优先级：DSH_BASE_URL > /etc/dsh-url.conf > DSH_DOMAIN
+# > 单元里的 --trusted-host（多个时优先选能解析的）> 本机回环）
+CONF="${DSH_URL_CONF:-/etc/dsh-url.conf}"
 PORT="${DSH_PORT:-}"
 if [ -z "$PORT" ]; then
     PORT="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--port[ =]\K[0-9]+' | head -n1 || true)"
-    PORT="${PORT:-3080}"
+    if [ -z "$PORT" ]; then PORT=3080; fi
 fi
-DOMAIN="${DSH_DOMAIN:-}"
-if [ -z "$DOMAIN" ]; then
-    DOMAIN="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--trusted-host[ =]\K\S+' | head -n1 || true)"
-fi
-if [ -n "$DOMAIN" ]; then
-    BASE_URL="https://$DOMAIN"
+
+BASE_URL=""
+if [ -n "${DSH_BASE_URL:-}" ]; then
+    BASE_URL="${DSH_BASE_URL%/}"
+elif [ -r "$CONF" ]; then
+    BASE_URL="$(grep -oP '^PUBLIC_BASE_URL=\K\S+' "$CONF" 2>/dev/null | head -n1 || true)"
+    BASE_URL="${BASE_URL%/}"
+elif [ -n "${DSH_DOMAIN:-}" ]; then
+    BASE_URL="https://${DSH_DOMAIN%/}"
 else
-    BASE_URL="http://127.0.0.1:$PORT"
+    HOSTS="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oP -- '--trusted-host[ =]\K\S+' || true)"
+    FIRST=""
+    for h in $HOSTS; do
+        case "$h" in *:*) continue ;; esac    # IP:端口 不能直接拼 https
+        if [ -z "$FIRST" ]; then FIRST="$h"; fi
+        if getent hosts "$h" >/dev/null 2>&1; then BASE_URL="https://$h"; break; fi
+    done
+    if [ -z "$BASE_URL" ] && [ -n "$FIRST" ]; then BASE_URL="https://$FIRST"; fi
+fi
+if [ -z "$BASE_URL" ]; then BASE_URL="http://127.0.0.1:$PORT"; fi
+
+# 域名解析自检：拼出了域名却解析不到，多半是换了域名但单元/配置没同步
+if [[ "$BASE_URL" == https://* ]]; then
+    H="${BASE_URL#https://}"; H="${H%%/*}"; H="${H%%:*}"
+    if ! getent hosts "$H" >/dev/null 2>&1; then
+        echo "⚠️ 域名 $H 当前无法解析（DNS 未生效，或该域名已停用）。" >&2
+        echo "   如已更换域名，执行：sudo dsh-domain 新域名" >&2
+    fi
 fi
 
 # 记录重启前状态，用于区分新旧日志

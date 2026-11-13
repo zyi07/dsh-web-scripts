@@ -64,7 +64,8 @@ sudo DSH_DOMAIN=你的域名 bash install.sh
 | `dsh-restart` | 重启服务，轮询等待就绪，输出新链接；失败时打印 journal 末尾 |
 | `dsh-start` | 启动服务并输出链接（配合 `dsh-stop` 手动启停） |
 | `dsh-stop` | 停止服务（显式 stop 后 systemd 不会自动拉起） |
-| `dsh-upgrade` | 升级核心 → 补跑原生模块预编译 → 配置冒烟测试 → 通过才重启 |
+| `dsh-upgrade` | 升级核心 → 补跑原生模块预编译 → 配置冒烟测试 → 通过才重启（`--check` 只检查） |
+| `dsh-domain` | 查看/更换对外域名（自动清理解析不到的旧域名） |
 
 全部脚本的环境变量、FAQ（改域名、cookie/签名密钥机制）等：
 **详见 [docs/USAGE.md](docs/USAGE.md)**。

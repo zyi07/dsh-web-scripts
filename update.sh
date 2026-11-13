@@ -26,7 +26,7 @@ echo "==> 拉取最新代码"
 git pull --ff-only
 
 echo "==> 重装脚本到 /usr/local/bin"
-$SUDO install -m 755 bin/dsh-url bin/dsh-restart bin/dsh-upgrade bin/dsh-start bin/dsh-stop /usr/local/bin/
+$SUDO install -m 755 bin/dsh-url bin/dsh-restart bin/dsh-upgrade bin/dsh-start bin/dsh-stop bin/dsh-domain /usr/local/bin/
 
 echo "==> 防泄露自检（扫描脚本中是否有硬编码域名）"
 LEAK="$(grep -rnE '[a-z0-9-]+\.(com|net|org|cn|dev|app|io|dpdns\.org)' bin/ install.sh update.sh 2>/dev/null \
@@ -41,4 +41,4 @@ echo "✓ 未发现硬编码隐私域名"
 
 echo ""
 echo "✅ 更新完成，当前版本：$(git log --oneline -1)"
-echo "   可用命令：dsh-url / dsh-restart / dsh-start / dsh-stop / dsh-upgrade"
+echo "   可用命令：dsh-url / dsh-restart / dsh-start / dsh-stop / dsh-upgrade / dsh-domain"

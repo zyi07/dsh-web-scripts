@@ -13,6 +13,7 @@
 | `dsh-restart` | `/usr/local/bin` | 重启服务并输出新链接 |
 | `dsh-start` | `/usr/local/bin` | 启动服务并输出链接 |
 | `dsh-stop` | `/usr/local/bin` | 停止服务 |
+| `dsh-domain` | `/usr/local/bin` | 查看/更换对外域名（自动清理失效旧域名） |
 | `dsh-upgrade` | `/usr/local/bin` | 升级 DSH 核心（先冒烟测试，通过才重启） |
 
 ---
@@ -97,6 +98,24 @@ DSH_VERSION=0.2.2-rc.2 dsh-upgrade   # 安装指定版本
 
 ---
 
+## dsh-domain — 查看 / 更换对外域名
+
+```bash
+dsh-domain                          # 查看：/etc/dsh-url.conf、单元里的 trusted-host、各自解析状态
+sudo dsh-domain 新域名               # 换域名：写 conf + 重建 trusted-host + 重启 + 输出新链接
+sudo dsh-domain --add 域名           # 多域名并用：只追加，不清旧条目
+sudo dsh-domain --no-restart 域名    # 只改配置，稍后自己 dsh-restart
+```
+
+**换域名只改 DNS 是不够的**：DSH 用 `--trusted-host` 做 Host 白名单，浏览器访问的域名
+不在其中时，页面能打开但 `/api` 请求全部被拒。`dsh-domain` 会同时处理三件事：
+
+1. 写 `/etc/dsh-url.conf` 的 `PUBLIC_BASE_URL`（`dsh-url` / `dsh-restart` / `dsh-start` 优先读它）
+2. 重建单元的 `--trusted-host`：**丢弃已解析不到的旧域名**，保留 `IP:端口` 和仍可解析的域名，追加新域名
+3. `daemon-reload` 并重启，最后打印新链接
+
+修改前会自动备份单元文件（`/etc/systemd/system/dsh.service.bak-时间戳`）。幂等：域名已在单元里则不重写。
+
 ## 环境变量（所有脚本通用）
 
 | 变量 | 默认值 | 适用 |
@@ -106,9 +125,15 @@ DSH_VERSION=0.2.2-rc.2 dsh-upgrade   # 安装指定版本
 | `DSH_PORT` | 自动探测（无则 3080） | url/restart/start：回环地址端口 |
 | `DSH_START_TIMEOUT` | `30` | restart/start：等待就绪秒数 |
 | `DSH_NPM_PACKAGE` | `@deepseek-ai/dsh` | upgrade：npm 包名 |
+| `DSH_BASE_URL` | 空 | url/restart/start：直接指定完整访问地址（最高优先级） |
+| `DSH_URL_CONF` | `/etc/dsh-url.conf` | url/restart/start/domain：对外地址配置文件路径 |
 
-**访问地址探测优先级**：`DSH_DOMAIN` 环境变量 > systemd 单元里的
-`--trusted-host` 参数 > `http://127.0.0.1:端口`。不硬编码任何域名，多台机器各自输出各自的。
+**访问地址探测优先级**：`DSH_BASE_URL` > `/etc/dsh-url.conf` 的 `PUBLIC_BASE_URL` >
+`DSH_DOMAIN` > systemd 单元里的 `--trusted-host`（多个时**优先选能解析的域名**）>
+`http://127.0.0.1:端口`。不硬编码任何域名，多台机器各自输出各自的。
+
+域名解析不到时会向 stderr 告警并提示改用 `dsh-domain`——这是"换了域名但只改了 DNS、
+没同步 systemd 单元"的典型症状。
 
 ---
 
@@ -116,12 +141,20 @@ DSH_VERSION=0.2.2-rc.2 dsh-upgrade   # 安装指定版本
 
 ### 怎么修改域名？
 
-1. 改 systemd 单元：`sudo systemctl edit --full dsh`，把 `ExecStart` 里的
-   `--trusted-host 旧域名` 改成新域名（或直接编辑 `/etc/systemd/system/dsh.service`）
-2. `sudo systemctl daemon-reload && sudo dsh-restart`
-3. 改反代/解析侧：nginx 的 `server_name` 或 CF 的 DNS 记录同步换成新域名
-4. **浏览器需要重新登录**：cookie 按域名绑定（cookie 名含 host 哈希），换域名后旧 cookie 不被认，用 `dsh-url` 的新链接登录即可
-5. 注意 `install.sh` 对已存在的单元是"保留不覆盖"，所以改域名走上面第 1 步，而不是重跑 install.sh
+```bash
+sudo dsh-domain 新域名        # 一条命令：写配置 + 换白名单 + 重启 + 输出新链接
+```
+
+然后同步反代/解析侧：nginx 的 `server_name`，或 Cloudflare 的 DNS 记录。
+
+注意：
+
+- `/etc/dsh-url.conf` 里可能出现**已失效的旧域名**（脚本仍会告警但照它输出）——
+  用 `dsh-domain 新域名`（不带 `--add`）会把它清掉
+- **浏览器需要重新登录**：cookie 按域名绑定（cookie 名含 host 哈希），换域名后旧 cookie 不被认，
+  用 `dsh-url` 的新链接登录一次即可
+- 一台机器想同时用多个域名：`sudo dsh-domain --add 第二个域名`，
+  但 `dsh-url` 只会输出 `/etc/dsh-url.conf` 里的那一个（想换输出就再跑一次 `dsh-domain`）
 
 ### 签名密钥与 cookie 的机制（重启会不会让登录失效？会不会堆积历史 cookie？）
 
